@@ -1,0 +1,436 @@
+     1                                  ;
+     2                                  ; ldrinit.asm
+     3                                  ;
+     4                                  ; OS loader real mode startup
+     5                                  ;
+     6                                  ; Copyright (C) 2002 Michael Ringgaard. All rights reserved.
+     7                                  ;
+     8                                  ; Redistribution and use in source and binary forms, with or without
+     9                                  ; modification, are permitted provided that the following conditions
+    10                                  ; are met:
+    11                                  ; 
+    12                                  ; 1. Redistributions of source code must retain the above copyright 
+    13                                  ;    notice, this list of conditions and the following disclaimer.  
+    14                                  ; 2. Redistributions in binary form must reproduce the above copyright
+    15                                  ;    notice, this list of conditions and the following disclaimer in the
+    16                                  ;    documentation and/or other materials provided with the distribution.  
+    17                                  ; 3. Neither the name of the project nor the names of its contributors
+    18                                  ;    may be used to endorse or promote products derived from this software
+    19                                  ;    without specific prior written permission. 
+    20                                  ; 
+    21                                  ; THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+    22                                  ; ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+    23                                  ; IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+    24                                  ; ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+    25                                  ; FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+    26                                  ; DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+    27                                  ; OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+    28                                  ; HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+    29                                  ; LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+    30                                  ; OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF 
+    31                                  ; SUCH DAMAGE.
+    32                                  ; 
+    33                                  
+    34                                  ;
+    35                                  ; The ldrinit is called by the bootstrap (bootsector) after 
+    36                                  ; the os loader has been loaded. The ldrinit uses a simplified 
+    37                                  ; DOS .EXE format. It is attached to osldr.dll as the DOS stub
+    38                                  ; for the DLL.
+    39                                  ;
+    40                                  
+    41                                  ; The os loader is loaded at the fixed address 0x90000. 
+    42                                  ; This allows for 56K for the loader, data area and stack.
+    43                                  
+    44                                  OSLDRSEG    equ 0x9000
+    45                                  OSLDRBASE   equ (OSLDRSEG * 16)
+    46                                  
+    47                                  ; Put the stack 8K below the 640K border to allow room for
+    48                                  ; the Extended BIOS Data Area
+    49                                  
+    50                                  STACKTOP    equ 0x9e000
+    51                                  
+    52                                          BITS    16
+    53                                          SECTION .text
+    54                                  
+    55                                  ;
+    56                                  ; EXE file header
+    57                                  ;
+    58                                  
+    59                                  textstart:
+    60                                  
+    61                                  header_start:
+    62 00000000 4D5A                            db      0x4d, 0x5a          ; EXE file signature
+    63 00000002 F800                            dw      textsize % 512
+    64 00000004 0300                            dw      (textsize + 511) / 512
+    65 00000006 0000                            dw      0                   ; Relocation information: none
+    66 00000008 0400                            dw      (header_end - header_start) / 16 ; Header size in paragraphs
+    67 0000000A 0000                            dw      0                   ; Min extra mem
+    68 0000000C FFFF                            dw      0xffff              ; Max extra mem
+    69 0000000E 0000                            dw      0                   ; Initial SS (before fixup)
+    70 00000010 0000                            dw      0                   ; Initial SP 
+    71 00000012 0000                            dw      0                   ; (no) Checksum
+    72 00000014 [4000]                          dw      start               ; Initial IP
+    73 00000016 0000                            dw      0                   ; Initial CS (before fixup)
+    74 00000018 [4000]                          dw      header_end          ; File offset to relocation table: none
+    75 0000001A [D801]                          dw      krnlopts            ; Overlay number (offset for kernel options)
+    76 0000001C 00<rept>                        align   64, db 0
+    77                                  header_end:
+    78                                  
+    79                                  ;
+    80                                  ; Entry point from bootstrap
+    81                                  ;
+    82                                  
+    83                                  start:
+    84                                          ; Setup initial environment
+    85 00000040 8CC8                            mov     ax, cs
+    86 00000042 8ED8                            mov     ds, ax
+    87 00000044 8EC0                            mov     es, ax
+    88                                  
+    89                                          ; Save boot drive and boot image
+    90 00000046 8816[D001]                      mov     [bootdrv], dl
+    91 0000004A 66891E[D401]                    mov     [bootimg], ebx
+    92                                  
+    93                                          ; Display boot message
+    94 0000004F BE[EE04]                        mov     si, osldrmsg
+    95 00000052 E86600                          call    print
+    96                                  
+    97                                          ; Try to get system memory map from BIOS
+    98 00000055 E8FA00                          call    getmemmap
+    99                                  
+   100                                          ; Check for APM BIOS
+   101 00000058 E88400                          call    apmbioscheck
+   102                                  
+   103                                          ; Move system into 32-bit protected mode
+   104 0000005B FA                              cli                         ; no interrupts allowed
+   105                                  
+   106                                          ; Enable A20
+   107 0000005C E87100                          call    empty8042
+   108 0000005F B0D1                            mov     al, 0xd1            ; command write
+   109 00000061 E664                            out     0x64, al
+   110 00000063 E86A00                          call    empty8042
+   111 00000066 B0DF                            mov     al,0xdf             ; A20 on
+   112 00000068 E660                            out     0x60, al
+   113 0000006A E86300                          call    empty8042
+   114                                  
+   115                                          ; Load idt and gdt
+   116 0000006D 0F011E[9A01]                    lidt    [idtsel]            ; load idt with 0,0
+   117 00000072 0F0116[A001]                    lgdt    [gdtsel]            ; load gdt with whatever appropriate
+   118                                  
+   119                                          ; Switch to protected mode
+   120 00000077 B80100                          mov     ax, 0x0001
+   121 0000007A 0F01F0                          lmsw    ax
+   122                                  
+   123                                          ; Initialize segment registers
+   124 0000007D B81000                          mov     ax, flat_data - gdt
+   125 00000080 8ED8                            mov     ds, ax
+   126 00000082 8EC0                            mov     es, ax
+   127 00000084 8EE0                            mov     fs, ax
+   128 00000086 8EE8                            mov     gs, ax
+   129 00000088 8ED0                            mov     ss, ax
+   130                                  
+   131                                          ; Set code segment and clear prefetch
+   132 0000008A 66EA[92000900]0800              jmp     dword (flat_code - gdt):start32 + OSLDRBASE
+   133                                  
+   134                                  start32:
+   135                                          BITS    32
+   136                                          ; Setup stack
+   137 00000092 BC00E00900                      mov     esp, STACKTOP
+   138                                          
+   139                                          ; Add room for protected mode stack pointer
+   140 00000097 54                              push    esp
+   141                                  
+   142                                          ; Clear flags
+   143 00000098 6A02                            push    dword 2
+   144 0000009A 9D                              popfd
+   145                                  
+   146                                          ; Calculate entrypoint
+   147 0000009B A13C000900                      mov     eax, [OSLDRBASE + 0x3c]
+   148 000000A0 8B8028000900                    mov     eax, [eax + OSLDRBASE + 0x28]
+   149 000000A6 0500000900                      add     eax, OSLDRBASE
+   150                                  
+   151                                          ; Push os loader load address and boot parameter block
+   152 000000AB 6A00                            push    dword 0
+   153 000000AD 68[D0010900]                    push    dword OSLDRBASE + bootparams
+   154 000000B2 6800000900                      push    dword OSLDRBASE
+   155                                  
+   156                                          ; Call startup code in os loader
+   157 000000B7 FFD0                            call    eax
+   158                                  
+   159                                          ; We never return here
+   160 000000B9 FA                              cli
+   161 000000BA F4                              hlt
+   162                                  
+   163                                          BITS    16
+   164                                  
+   165                                  ;
+   166                                  ; Print string to console
+   167                                  ; si = ptr to first character of a null terminated string
+   168                                  ;
+   169                                  
+   170                                  print:
+   171 000000BB 50                              push    ax
+   172 000000BC FC                              cld
+   173                                  nextchar:
+   174 000000BD 8A04                            mov     al, [si]
+   175 000000BF 3C00                            cmp     al, 0
+   176 000000C1 7406                            je      printdone
+   177 000000C3 E80500                          call    printchar
+   178 000000C6 46                              inc     si
+   179 000000C7 EBF4                            jmp     nextchar
+   180                                  printdone:
+   181 000000C9 58                              pop     ax
+   182 000000CA C3                              ret
+   183                                  
+   184                                  ;
+   185                                  ; Print a single character to the console
+   186                                  ;   al = character to be printed
+   187                                  ;
+   188                                  
+   189                                  printchar:
+   190 000000CB B40E                            mov     ah, 0x0e
+   191 000000CD CD10                            int     0x10
+   192 000000CF C3                              ret
+   193                                  
+   194                                  ;
+   195                                  ; Empty keyboard command queue
+   196                                  ;
+   197                                  
+   198                                  empty8042:
+   199 000000D0 E80700                          call    delay
+   200 000000D3 E464                            in      al,0x64         ; 8042 status port
+   201 000000D5 A802                            test    al,2            ; is input buffer full?
+   202 000000D7 75F7                            jnz     empty8042       ; yes - loop
+   203 000000D9 C3                              ret
+   204                                  
+   205                                          ; Delay is needed after doing i/o
+   206                                  delay:
+   207 000000DA EB00EB00                        dw      0x00eb, 0x00eb
+   208 000000DE C3                              ret
+   209                                  
+   210                                  ;
+   211                                  ; Check for APM BIOS
+   212                                  ;
+   213                                  
+   214                                  apmbioscheck:
+   215 000000DF B80053                          mov     ax, 0x5300          ; APM BIOS installation check
+   216 000000E2 31DB                            xor     bx, bx
+   217 000000E4 CD15                            int     0x15
+   218 000000E6 7269                            jc      apmdone
+   219                                  
+   220 000000E8 81FB4D50                        cmp     bx, 0x504d          ; Check for "PM" signature
+   221 000000EC 7563                            jne     apmdone
+   222                                  
+   223 000000EE 83E102                          and     cx, 0x02            ; Is 32-bit supported?
+   224 000000F1 745E                            jz      apmdone
+   225                                          
+   226 000000F3 A3[5802]                        mov     [apmversion], ax    ; Record the APM BIOS version
+   227 000000F6 890E[5A02]                      mov     [apmflags], cx      ; and flags
+   228                                  
+   229 000000FA B80453                          mov     ax, 0x5304          ; Disconnect first just in case
+   230 000000FD 31DB                            xor     bx, bx
+   231 000000FF CD15                            int     0x15                ; Ignore return code
+   232                                  
+   233 00000101 B80353                          mov     ax, 0x5303          ; APM BIOS 32-bit Connect
+   234 00000104 6631DB                          xor     ebx, ebx
+   235 00000107 31C9                            xor     cx, cx
+   236 00000109 31D2                            xor     dx, dx
+   237 0000010B 6631F6                          xor     esi, esi
+   238 0000010E 31FF                            xor     di, di
+   239 00000110 CD15                            int     0x15
+   240 00000112 7236                            jc      no32apmbios
+   241                                          
+   242 00000114 A3[5C02]                        mov     [apmcseg32], ax
+   243 00000117 66891E[5E02]                    mov     [apmentry], ebx
+   244 0000011C 890E[6002]                      mov     [apmcseg16], cx
+   245 00000120 8916[6202]                      mov     [apmdseg], dx
+   246 00000124 8936[6402]                      mov     [apmcseg32len], si
+   247 00000128 66C1EE10                        shr     esi, 16
+   248 0000012C 8936[6602]                      mov     [apmcseg16len], si
+   249 00000130 893E[6802]                      mov     [apmdseglen], di
+   250                                          
+   251 00000134 B80053                          mov     ax, 0x5300          ; Redo APM BIOS installation check
+   252 00000137 31DB                            xor     bx, bx
+   253 00000139 31C9                            xor     cx, cx
+   254 0000013B CD15                            int     0x15
+   255 0000013D 7202                            jc      apmdisconnect
+   256                                  
+   257                                  ;       cmp     bx, 0x504d          ; Check for "PM" signature
+   258                                  ;       jne     apmdisconnect
+   259                                  
+   260                                  ;       mov     [apmversion], ax    ; Record the APM BIOS version
+   261                                  ;       mov     [apmflags], cx      ; and flags
+   262                                  
+   263 0000013F EB10                            jmp     apmdone
+   264                                  
+   265                                  apmdisconnect:
+   266 00000141 B80453                          mov     ax, 0x5304          ; Disconnect
+   267 00000144 31DB                            xor     bx, bx
+   268 00000146 CD15                            int     0x15
+   269 00000148 EB07                            jmp     apmdone
+   270                                          
+   271                                  no32apmbios:
+   272 0000014A B9FDFF                          mov     cx, 0xfffd          ; Remove 32 bit support bit
+   273 0000014D 210E[5A02]                      and     [apmflags], cx
+   274                                  
+   275                                  apmdone:
+   276 00000151 C3                              ret
+   277                                  
+   278                                  ;
+   279                                  ; Get memory map from BIOS
+   280                                  ;
+   281                                  
+   282                                  SMAP       equ 0x534d4150
+   283                                  MAXMEMRECS equ 32
+   284                                  MEMRECSIZ  equ 20
+   285                                     
+   286                                  getmemmap:
+   287                                          ; Get memory map using int 15 ax=0xe80
+   288 00000152 6631DB                          xor     ebx, ebx            ; Continuation value
+   289 00000155 BF[6E02]                        mov     di, memrecs         ; Pointer to memmap
+   290                                  
+   291                                  e820loop:
+   292                                          ; Get next memory map entry
+   293 00000158 66B820E80000                    mov     eax, 0x0000e820     ; eax = E820
+   294 0000015E 66BA50414D53                    mov     edx, SMAP           ; edx = ASCII 'SMAP'
+   295 00000164 66B914000000                    mov     ecx, MEMRECSIZ      ; ecx = Size of the mementry
+   296 0000016A 1E                              push    ds                  ; es:di = Address of memory map
+   297 0000016B 07                              pop     es
+   298 0000016C CD15                            int     0x15
+   299 0000016E 7222                            jc      e820fail
+   300                                  
+   301 00000170 663D50414D53                    cmp     eax, SMAP           ; Check the return is `SMAP'
+   302 00000176 751A                            jne     e820fail
+   303                                  
+   304                                          ; Save new memory entry
+   305 00000178 66A1[6A02]                      mov     eax, [nrmemrecs]    ; Check for max number of memory record
+   306 0000017C 6683F820                        cmp     eax, MAXMEMRECS
+   307 00000180 7D10                            jnl     e820fail
+   308                                  
+   309 00000182 6640                            inc     eax                 ; Move forward to next record in memory map
+   310 00000184 66A3[6A02]                      mov     [nrmemrecs], eax
+   311 00000188 83C714                          add     di, MEMRECSIZ
+   312                                          
+   313                                          ; Check for more memory records
+   314 0000018B 6683FB00                        cmp     ebx, 0
+   315 0000018F 75C7                            jne     e820loop
+   316                                  
+   317 00000191 C3                              ret
+   318                                  
+   319                                  e820fail:
+   320 00000192 6631C0                          xor     eax, eax            ; Reset memory map
+   321 00000195 66A3[6A02]                      mov     [nrmemrecs], eax
+   322 00000199 C3                              ret
+   323                                  
+   324                                  ;
+   325                                  ; Global descriptor table
+   326                                  ;
+   327                                  
+   328                                  D_DATA          equ     0x1000
+   329                                  D_CODE          equ     0x1800
+   330                                  
+   331                                  D_WRITE         equ     0x200
+   332                                  D_READ          equ     0x200
+   333                                  D_CONFORM       equ     0x400
+   334                                  
+   335                                  D_BIG           equ     0x40
+   336                                  D_BIG_LIM       equ     0x80
+   337                                  
+   338                                  D_PRESENT       equ     0x8000
+   339                                  
+   340                                  %macro segdesc 3
+   341                                          dw      (%2 & 0xffff)
+   342                                          dw      (%1 & 0xffff)
+   343                                          db      (%1) >> 16
+   344                                          db      ((%3) | D_PRESENT) >> 8
+   345                                          db      ((%3) & 0xff) | ((%2) >> 16)
+   346                                          db      (%1) >> 24
+   347                                  %endmacro
+   348                                  
+   349                                  idtsel:
+   350 0000019A 0000                            dw      0               ; idt limit = 0
+   351 0000019C 00000000                        dw      0,0             ; idt base = 0L
+   352                                  
+   353                                  gdtsel:
+   354 000001A0 2700                            dw      gdtlen
+   355 000001A2 [A8010900]                      dd      gdt + OSLDRBASE
+   356                                  
+   357 000001A6 90<rept>                        align   8
+   358                                  gdt:
+   359                                  
+   360                                  null_desc       segdesc 0,0,0
+   361                              <1> null_desc :
+   362 000001A8 0000                <1>  dw (%2 & 0xffff)
+   363 000001AA 0000                <1>  dw (%1 & 0xffff)
+   364 000001AC 00                  <1>  db (%1) >> 16
+   365 000001AD 80                  <1>  db ((%3) | D_PRESENT) >> 8
+   366 000001AE 00                  <1>  db ((%3) & 0xff) | ((%2) >> 16)
+   367 000001AF 00                  <1>  db (%1) >> 24
+   368                                  flat_code       segdesc 0, 0x0fffff, D_CODE | D_READ | D_BIG | D_BIG_LIM
+   369                              <1> flat_code :
+   370 000001B0 FFFF                <1>  dw (%2 & 0xffff)
+   371 000001B2 0000                <1>  dw (%1 & 0xffff)
+   372 000001B4 00                  <1>  db (%1) >> 16
+   373 000001B5 9A                  <1>  db ((%3) | D_PRESENT) >> 8
+   374 000001B6 CF                  <1>  db ((%3) & 0xff) | ((%2) >> 16)
+   375 000001B7 00                  <1>  db (%1) >> 24
+   376                                  flat_data       segdesc 0, 0x0fffff, D_DATA | D_WRITE | D_BIG | D_BIG_LIM
+   377                              <1> flat_data :
+   378 000001B8 FFFF                <1>  dw (%2 & 0xffff)
+   379 000001BA 0000                <1>  dw (%1 & 0xffff)
+   380 000001BC 00                  <1>  db (%1) >> 16
+   381 000001BD 92                  <1>  db ((%3) | D_PRESENT) >> 8
+   382 000001BE CF                  <1>  db ((%3) & 0xff) | ((%2) >> 16)
+   383 000001BF 00                  <1>  db (%1) >> 24
+   384                                  real_code       segdesc OSLDRBASE, 0x0ffff, D_CODE | D_READ | D_CONFORM
+   385                              <1> real_code :
+   386 000001C0 FFFF                <1>  dw (%2 & 0xffff)
+   387 000001C2 0000                <1>  dw (%1 & 0xffff)
+   388 000001C4 09                  <1>  db (%1) >> 16
+   389 000001C5 9E                  <1>  db ((%3) | D_PRESENT) >> 8
+   390 000001C6 00                  <1>  db ((%3) & 0xff) | ((%2) >> 16)
+   391 000001C7 00                  <1>  db (%1) >> 24
+   392                                  real_data       segdesc OSLDRBASE, 0x0ffff, D_DATA | D_WRITE
+   393                              <1> real_data :
+   394 000001C8 FFFF                <1>  dw (%2 & 0xffff)
+   395 000001CA 0000                <1>  dw (%1 & 0xffff)
+   396 000001CC 09                  <1>  db (%1) >> 16
+   397 000001CD 92                  <1>  db ((%3) | D_PRESENT) >> 8
+   398 000001CE 00                  <1>  db ((%3) & 0xff) | ((%2) >> 16)
+   399 000001CF 00                  <1>  db (%1) >> 24
+   400                                  
+   401                                  gdtlen          equ $ - gdt - 1
+   402                                  
+   403                                  ;
+   404                                  ; Boot Parameter Block
+   405                                  ;
+   406                                  
+   407                                  bootparams:
+   408                                  
+   409 000001D0 00000000                bootdrv      dd    0        ; Boot drive
+   410 000001D4 00000000                bootimg      dd    0        ; RAM disk image address
+   411                                  
+   412 000001D8 00<rept>                krnlopts     times 128 db 0 ; Kernel options
+   413                                  
+   414 00000258 0000                    apmversion   dw    0        ; APM version (BCD format)
+   415 0000025A 0000                    apmflags     dw    0        ; APM flags from install check
+   416 0000025C 0000                    apmcseg32    dw    0        ; APM 32-bit code segment (real mode segment base address)
+   417 0000025E 0000                    apmentry     dw    0        ; Offset of the entry point into the APM BIOS
+   418 00000260 0000                    apmcseg16    dw    0        ; APM 16-bit code segment (real mode segment base address)
+   419 00000262 0000                    apmdseg      dw    0        ; APM data segment (real mode segment base address)
+   420 00000264 0000                    apmcseg32len dw    0        ; APM BIOS 32-bit code segment length
+   421 00000266 0000                    apmcseg16len dw    0        ; APM BIOS 16-bit code segment length
+   422 00000268 0000                    apmdseglen   dw    0        ; APM BIOS data segment length
+   423                                  
+   424 0000026A 00000000                nrmemrecs    dd    0        ; System memory map
+   425 0000026E 00<rept>                memrecs      times (MAXMEMRECS * MEMRECSIZ) db 0
+   426                                  
+   427                                  ;
+   428                                  ; Strings
+   429                                  ;
+   430                                  
+   431 000004EE 2C206C6472696E6974-     osldrmsg:    db    ', ldrinit', 0
+   432 000004F7 00                 
+   433                                  
+   434                                  textend:
+   435                                  
+   436                                  textsize equ (textend - textstart)

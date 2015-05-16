@@ -1,0 +1,15 @@
+unzip to sanos folder
+edit makefile to make the virtual image bigger
+bin\make -f Makefile.cross
+run under quemu
+/$ cd /usr/src
+/usr/src$ make install
+/usr/src$ reboot
+sut down
+"C:\Program Files\qemu\qemu-img" convert -O vpc sanos.vmdk sanos.vhd (hyper-v convert
+eth0:ip=10.0.1.100,gw=10.0.1.28,mask=255.255.255.0
+www.jbox.dk 93.166.244.18
+httpget 93.166.244.18 /downloads/webserver.c webserver.c
+to build under windows (like the cross method above better)
+"C:\Program Files (x86)\Microsoft Visual Studio 10.0\Common7\Tools\vsvars32.bat"
+nmake sanos all

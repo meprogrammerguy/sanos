@@ -1,0 +1,378 @@
+     1                                  ;
+     2                                  ; bioscall.asm
+     3                                  ;
+     4                                  ; Protected mode BIOS calls
+     5                                  ;
+     6                                  ; Copyright (C) 2011 Michael Ringgaard. All rights reserved.
+     7                                  ;
+     8                                  ; Redistribution and use in source and binary forms, with or without
+     9                                  ; modification, are permitted provided that the following conditions
+    10                                  ; are met:
+    11                                  ; 
+    12                                  ; 1. Redistributions of source code must retain the above copyright 
+    13                                  ;    notice, this list of conditions and the following disclaimer.  
+    14                                  ; 2. Redistributions in binary form must reproduce the above copyright
+    15                                  ;    notice, this list of conditions and the following disclaimer in the
+    16                                  ;    documentation and/or other materials provided with the distribution.  
+    17                                  ; 3. Neither the name of the project nor the names of its contributors
+    18                                  ;    may be used to endorse or promote products derived from this software
+    19                                  ;    without specific prior written permission. 
+    20                                  ; 
+    21                                  ; THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+    22                                  ; ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+    23                                  ; IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+    24                                  ; ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+    25                                  ; FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+    26                                  ; DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+    27                                  ; OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+    28                                  ; HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+    29                                  ; LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+    30                                  ; OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF 
+    31                                  ; SUCH DAMAGE.
+    32                                  ; 
+    33                                  
+    34                                          SECTION .text
+    35                                  
+    36                                          global  prot2real
+    37                                          global  _prot2real
+    38                                          global  real2prot
+    39                                          global  _real2prot
+    40                                          global  bios_print_string
+    41                                          global  _bios_print_string
+    42                                          global  bios_get_drive_params
+    43                                          global  _bios_get_drive_params
+    44                                          global  bios_read_disk
+    45                                          global  _bios_read_disk
+    46                                  
+    47                                  ; OS Loader base address
+    48                                  OSLDRSEG    equ 0x9000
+    49                                  OSLDRBASE   equ (OSLDRSEG * 16)
+    50                                  
+    51                                  ; Segment selectors for data and code in real and protected mode
+    52                                  PROT_CSEG   equ 0x08
+    53                                  PROT_DSEG   equ 0x10
+    54                                  REAL_CSEG   equ 0x18
+    55                                  REAL_DSEG   equ 0x20
+    56                                  
+    57                                  ; Location of real mode stack
+    58                                  REAL_STACK  equ (0x2000 - 0x10)
+    59                                  
+    60                                  ; Convert linear address to osldr segment-relative address
+    61                                  %define LOCAL(addr) (addr - OSLDRBASE)
+    62                                  
+    63                                  ;
+    64                                  ; Switch from protected to real mode
+    65                                  ;
+    66                                  
+    67                                  prot2real:
+    68                                  _prot2real:
+    69                                          BITS    32
+    70                                          ; No interrupts while switching mode
+    71 00000000 FA                              cli
+    72                                  
+    73                                          ; Save protected mode stack and base pointers
+    74 00000001 89E0                            mov     eax, esp
+    75 00000003 A3[7C010000]                    mov     [prot_esp], eax
+    76 00000008 89E8                            mov     eax, ebp
+    77 0000000A A3[80010000]                    mov     [prot_ebp], eax
+    78                                          
+    79                                          ; Save descritors
+    80 0000000F 0F010D[84010000]                sidt    [prot_idt]
+    81 00000016 0F0105[8A010000]                sgdt    [prot_gdt]
+    82                                  
+    83                                          ; Store return address in real mode stack
+    84 0000001D 8B0424                          mov     eax,  [esp]
+    85 00000020 A3F01F0000                      mov     [REAL_STACK], eax
+    86                                  
+    87                                          ; Set up real mode stack
+    88 00000025 B8F01F0000                      mov     eax, REAL_STACK
+    89 0000002A 89C4                            mov     esp, eax
+    90 0000002C 89C5                            mov     ebp, eax
+    91                                  
+    92                                          ; Setup segment registers
+    93 0000002E 66B82000                        mov     ax, REAL_DSEG
+    94 00000032 8ED8                            mov     ds, ax
+    95 00000034 8EC0                            mov     es, ax
+    96 00000036 8EE0                            mov     fs, ax
+    97 00000038 8EE8                            mov     gs, ax
+    98 0000003A 8ED0                            mov     ss, ax
+    99                                  
+   100                                          ; Transition to 16 bit segment
+   101 0000003C EA[4300F7FF]1800                jmp     REAL_CSEG:(LOCAL(start16))
+   102                                  
+   103                                  start16:
+   104                                          BITS    16
+   105                                  
+   106                                          ; Exit protected mode by clearing the PE bit of CR0
+   107 00000043 0F20C0                          mov     eax, cr0
+   108 00000046 6683E0FE                        and     eax, ~1
+   109 0000004A 0F22C0                          mov     cr0, eax
+   110                                  
+   111                                          ; Reload code segment register and clear prefetch
+   112 0000004D 66EA[5500F7FF]0090              jmp     dword OSLDRSEG:(LOCAL(realmode))
+   113                                  
+   114                                  realmode:
+   115                                  
+   116                                          ; Setup real mode segment registers
+   117 00000055 B80090                          mov     ax, OSLDRSEG
+   118 00000058 8ED8                            mov     ds, ax
+   119 0000005A 8EC0                            mov     es, ax
+   120 0000005C 8EE0                            mov     fs, ax
+   121 0000005E 8EE8                            mov     gs, ax
+   122 00000060 31C0                            xor     ax, ax
+   123 00000062 8ED0                            mov     ss, ax
+   124                                          
+   125                                          ; Load real mode IDT
+   126 00000064 670F011D[9001F7FF]              a32 lidt [LOCAL(real_idt)]
+   127                                  
+   128                                          ; Return on the real mode stack
+   129 0000006C FB                              sti
+   130 0000006D C3                              ret
+   131                                  
+   132                                  ;
+   133                                  ; Switch from real to protected mode
+   134                                  ;
+   135                                  
+   136                                  real2prot:
+   137                                  _real2prot:
+   138                                          BITS    16
+   139                                          ; Disable interrupts
+   140 0000006E FA                              cli
+   141                                          
+   142                                          ; Restore protected mode descriptors
+   143 0000006F B80090                          mov     ax, OSLDRSEG
+   144 00000072 8ED8                            mov     ds, ax
+   145 00000074 670F011D[8401F7FF]              a32 lidt    [LOCAL(prot_idt)]
+   146 0000007C 670F0115[8A01F7FF]              a32 lgdt    [LOCAL(prot_gdt)]
+   147                                  
+   148                                          ; Enable protected mode
+   149 00000084 0F20C0                          mov     eax, cr0
+   150 00000087 6683C801                        or      eax, 1
+   151 0000008B 0F22C0                          mov     cr0, eax
+   152                                  
+   153                                          ; Set code segment and clear prefetch
+   154 0000008E 66EA[96000000]0800              jmp     dword PROT_CSEG:protmode
+   155                                  
+   156                                  protmode:
+   157                                          BITS    32
+   158                                          ; Setup rest of segment registers for protected mode
+   159 00000096 66B81000                        mov     ax, PROT_DSEG
+   160 0000009A 8ED8                            mov     ds, ax
+   161 0000009C 8EC0                            mov     es, ax
+   162 0000009E 8ED0                            mov     ss, ax
+   163 000000A0 8EE0                            mov     fs, ax
+   164 000000A2 8EE8                            mov     gs, ax
+   165                                  
+   166                                          ; Store return address in real mode stack
+   167 000000A4 8B0424                          mov     eax, [esp]
+   168 000000A7 A3F01F0000                      mov     [REAL_STACK], eax
+   169                                  
+   170                                          ; Restore protected mode stack
+   171 000000AC A1[7C010000]                    mov     eax, [prot_esp]
+   172 000000B1 89C4                            mov     esp, eax
+   173 000000B3 A1[80010000]                    mov     eax, [prot_ebp]
+   174 000000B8 89C5                            mov     ebp, eax
+   175                                  
+   176                                          ; Put return address onto protected mode stack
+   177 000000BA A1F01F0000                      mov     eax, [REAL_STACK]
+   178 000000BF 890424                          mov     [esp], eax
+   179                                  
+   180                                          ; Return on protected mode stack
+   181 000000C2 31C0                            xor     eax, eax
+   182 000000C4 C3                              ret
+   183                                  ;
+   184                                  ; Print string on screen
+   185                                  ;
+   186                                  ; void bios_print_string(char *str);
+   187                                  ;
+   188                                  
+   189                                  bios_print_string:
+   190                                  _bios_print_string:
+   191 000000C5 55                              push ebp
+   192 000000C6 89E5                            mov  ebp, esp
+   193                                  
+   194                                          ; Save register
+   195 000000C8 53                              push    ebx
+   196 000000C9 56                              push    esi
+   197 000000CA 57                              push    edi
+   198                                  
+   199                                          ; Get string address
+   200 000000CB 8B7508                          mov     esi, [ebp + 8]
+   201                                  
+   202                                          ; Enter real mode
+   203 000000CE E82DFFFFFF                      call    _prot2real
+   204                                          BITS     16
+   205                                  
+   206                                          ; Output all characters in string
+   207                                  nextchar:
+   208 000000D3 8A04                            mov     al, [si]
+   209 000000D5 3C00                            cmp     al, 0
+   210 000000D7 7411                            je      printdone
+   211                                  
+   212 000000D9 B40E                            mov     ah, 0x0e
+   213 000000DB CD10                            int     0x10
+   214                                          
+   215 000000DD 3C0A                            cmp     al, 10
+   216 000000DF 7506                            jne     notnl
+   217                                  
+   218                                          ; Output cr/nl for newline
+   219 000000E1 B00D                            mov     al, 13
+   220 000000E3 B40E                            mov     ah, 0x0e
+   221 000000E5 CD10                            int     0x10
+   222                                          
+   223                                  notnl:
+   224                                  
+   225 000000E7 46                              inc     si
+   226 000000E8 EBE9                            jmp     nextchar
+   227                                  printdone:
+   228                                                  
+   229                                          ; Return to protected mode
+   230 000000EA E881FF                          call    _real2prot
+   231                                          BITS    32
+   232                                  
+   233                                          ; Restore registers
+   234 000000ED 5F                              pop     edi
+   235 000000EE 5E                              pop     esi
+   236 000000EF 5B                              pop     ebx
+   237                                  
+   238                                          ; Return
+   239 000000F0 5D                              pop    ebp
+   240 000000F1 C3                              ret
+   241                                  
+   242                                  ;
+   243                                  ; Get drive parameters
+   244                                  ;
+   245                                  ; int bios_get_drive_params(int drive, unsigned int *cyls, unsigned int *heads, unsigned int *sects);
+   246                                  ;
+   247                                  
+   248                                  bios_get_drive_params:
+   249                                  _bios_get_drive_params:
+   250 000000F2 55                              push ebp
+   251 000000F3 89E5                            mov  ebp, esp
+   252                                  
+   253                                          ; Save register
+   254 000000F5 53                              push    ebx
+   255 000000F6 56                              push    esi
+   256 000000F7 57                              push    edi
+   257                                  
+   258                                          ; Get drive number
+   259 000000F8 8B5508                          mov     edx, [ebp + 8]
+   260                                  
+   261                                          ; Enter real mode
+   262 000000FB E800FFFFFF                      call    _prot2real
+   263                                          BITS     16
+   264                                  
+   265                                          ; Call BIOS int13h/ah=08h to get drive parameters
+   266 00000100 B408                            mov     ah, 0x08
+   267 00000102 31FF                            xor     di, di
+   268 00000104 8EC7                            mov     es, di
+   269 00000106 CD13                            int     0x13
+   270 00000108 88E3                            mov     bl, ah
+   271                                                  
+   272                                          ; Return to protected mode
+   273 0000010A E861FF                          call    _real2prot
+   274                                          BITS    32
+   275                                          
+   276                                          ; Compute number of cylinders
+   277 0000010D 31C0                            xor     eax, eax
+   278 0000010F 88E8                            mov     al, ch
+   279 00000111 88CC                            mov     ah, cl
+   280 00000113 C0EC06                          shr     ah, 6
+   281 00000116 6640                            inc     ax
+   282 00000118 8B7D0C                          mov     edi, [ebp + 12]
+   283 0000011B 8907                            mov     [edi], eax
+   284                                  
+   285                                          ; Compute number of heads
+   286 0000011D 31C0                            xor     eax, eax
+   287 0000011F 88F0                            mov     al, dh
+   288 00000121 6640                            inc     ax
+   289 00000123 8B7D10                          mov     edi, [ebp + 16]
+   290 00000126 8907                            mov     [edi], eax
+   291                                  
+   292                                          ; Compute number of sectors
+   293 00000128 31C0                            xor     eax, eax
+   294 0000012A 88C8                            mov     al, cl
+   295 0000012C 243F                            and     al, 0x3f
+   296 0000012E 8B7D14                          mov     edi, [ebp + 20]
+   297 00000131 8907                            mov     [edi], eax
+   298                                  
+   299                                          ; Return status
+   300 00000133 31C0                            xor     eax, eax
+   301 00000135 88D8                            mov     al, bl
+   302                                  
+   303                                          ; Restore registers
+   304 00000137 5F                              pop     edi
+   305 00000138 5E                              pop     esi
+   306 00000139 5B                              pop     ebx
+   307                                  
+   308                                          ; Return
+   309 0000013A 5D                              pop     ebp
+   310 0000013B C3                              ret
+   311                                  
+   312                                  ;
+   313                                  ; Read from disk
+   314                                  ;
+   315                                  ; int bios_read_disk(int drive, int cyl, int head, int sect, int nsect, void *buffer);
+   316                                  ;
+   317                                  
+   318                                  bios_read_disk:
+   319                                  _bios_read_disk:
+   320 0000013C 55                              push ebp
+   321 0000013D 89E5                            mov  ebp, esp
+   322                                  
+   323                                          ; Save register
+   324 0000013F 53                              push    ebx
+   325 00000140 56                              push    esi
+   326 00000141 57                              push    edi
+   327                                  
+   328                                          ; Get cylinder, head, and sector, number of sectors, and buffer
+   329 00000142 8A4518                          mov     al, [ebp + 24]          ; number of sectors
+   330 00000145 8A6D0C                          mov     ch, [ebp + 12]          ; cylinders (lo)
+   331 00000148 8A4D0D                          mov     cl, [ebp + 13]          ; cylinders (hi)
+   332 0000014B C0E106                          shl     cl, 6
+   333 0000014E 0A4D14                          or      cl, [ebp + 20]          ; sector number
+   334 00000151 8A7510                          mov     dh, [ebp + 16]          ; head number
+   335 00000154 8A5508                          mov     dl, [ebp + 8]           ; drive number
+   336 00000157 8B5D1C                          mov     ebx, [ebp + 28]         ; data buffer
+   337 0000015A 81EB00000900                    sub     ebx, OSLDRBASE
+   338                                  
+   339                                          ; Save ax which is not preserved in prot->real transition
+   340 00000160 6689C6                          mov     si, ax
+   341                                  
+   342                                          ; Enter real mode
+   343 00000163 E898FEFFFF                      call    _prot2real
+   344                                          BITS     16
+   345                                  
+   346                                          ; Call BIOS int13h/ah=02h to read disk
+   347 00000168 89F0                            mov     ax, si
+   348 0000016A B402                            mov     ah, 0x02
+   349 0000016C CD13                            int     0x13
+   350 0000016E 88E3                            mov     bl, ah
+   351                                  
+   352                                          ; Return to protected mode
+   353 00000170 E8FBFE                          call    _real2prot
+   354                                          BITS    32
+   355                                  
+   356                                          ; Return status
+   357 00000173 31C0                            xor     eax, eax
+   358 00000175 88D8                            mov     al, bl
+   359                                  
+   360                                          ; Restore registers
+   361 00000177 5F                              pop     edi
+   362 00000178 5E                              pop     esi
+   363 00000179 5B                              pop     ebx
+   364                                  
+   365                                          ; Return
+   366 0000017A 5D                              pop    ebp
+   367                                  
+   368 0000017B C3                              ret
+   369                                  
+   370                                  ; Storage for protected model stack pointer, and descriptor tables
+   371 0000017C 00000000                prot_esp:   dd 0
+   372 00000180 00000000                prot_ebp:   dd 0
+   373 00000184 000000000000            prot_idt:   dw 0, 0, 0
+   374 0000018A 000000000000            prot_gdt:   dw 0, 0, 0
+   375                                  
+   376                                  ; Real mode IDT for BIOS
+   377 00000190 FF03                    real_idt:   dw 0x3ff   ; 256 entries, 4b each = 1K
+   378 00000192 00000000                            dd 0       ; Real mode IVT @ 0x0000

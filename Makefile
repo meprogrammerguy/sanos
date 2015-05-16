@@ -56,7 +56,7 @@ DEFS=
 # MSVC=10 for Microsoft Visual Visual Studio 2010
 
 !IFNDEF MSVC
-MSVC=7
+MSVC=10
 !ENDIF
 
 AFLAGS=/nologo
