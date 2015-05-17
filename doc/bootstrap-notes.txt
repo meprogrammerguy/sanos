@@ -13,3 +13,11 @@ httpget 93.166.244.18 /downloads/webserver.c webserver.c
 to build under windows (like the cross method above better)
 "C:\Program Files (x86)\Microsoft Visual Studio 10.0\Common7\Tools\vsvars32.bat"
 nmake sanos all
+==
+Better try (Create Word DOC)
+"C:\Program Files (x86)\Microsoft Visual Studio 10.0\Common7\Tools\vsvars32.bat"
+nmake sanos all
+bin\make -f Makefile.cross
+run WinISO
+copy cross directory to sanos.iso
+hyper-V instructions
