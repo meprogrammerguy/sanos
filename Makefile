@@ -1664,6 +1664,9 @@ source: dirs
     -@if not exist $(INSTALL)\usr\src\utils mkdir $(INSTALL)\usr\src\utils
     -@if not exist $(INSTALL)\usr\src\cmds mkdir $(INSTALL)\usr\src\cmds
     -@if not exist $(INSTALL)\usr\src\win32 mkdir $(INSTALL)\usr\src\win32
+	-@if not exist $(INSTALL)\usr\mnt mkdir $(INSTALL)\usr\mnt
+    -@if not exist $(INSTALL)\usr\tmp mkdir $(INSTALL)\usr\tmp
+
     copy /Y $(SRC)\Makefile $(INSTALL)\usr\src
     xcopy /S /I /Y /Q $(SRC)\include $(INSTALL)\usr\include
     xcopy /S /I /Y /Q $(SRC)\lib $(INSTALL)\usr\src\lib

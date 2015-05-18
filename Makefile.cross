@@ -11,7 +11,7 @@ IMG=$(OUTPUT)/img
 ROOT=$(CURDIR)/cross/install
 CCPREFIX=$(ROOT)/usr
 
-all: sdkdisk
+all: sdkdisk bootcd
 
 source:
     mkdir -p $(OUTPUT) $(INSTALL) $(IMG) \
@@ -34,8 +34,21 @@ sanos:
     make -C $(ROOT)/usr/src cross
     make -C $(ROOT)/usr/src clean
 
-sdkdisk: $(IMG)/sanos.vmdk
+sdkdisk: $(IMG)/sanos_cross.vmdk
 
-$(IMG)/sanos.vmdk: source sanos
-    mkdfs -d $(IMG)/sanos.vmdk -t vmdk -b $(INSTALL)/boot/boot -l $(INSTALL)/boot/osldr.dll -k $(INSTALL)/boot/krnl.dll -c 100M -i -f -S $(INSTALL) -T /
+$(IMG)/sanos_cross.vmdk: source sanos
+    mkdfs -d $(IMG)/sanos_cross.vmdk -t vmdk -b $(INSTALL)/boot/boot -l $(INSTALL)/boot/osldr.dll -k $(INSTALL)/boot/krnl.dll -c 100M -i -f -S $(INSTALL) -T /
+	
+#
+# bootcd
+#
+
+bootcd: $(IMG)/sanos_cross.iso
+
+$(IMG)/sanos_cross.iso: source sanos
+    mkdfs -d $(INSTALL)/BOOTIMG.BIN -b $(INSTALL)/boot/cdemboot -l $(INSTALL)/boot/osldr.dll -k $(INSTALL)/boot/krnl.dll -c 512 -C 1440 -I 8192 -i -f -K rootdev=cd0,rootfs=cdfs
+	
+    ./tools/mkisofs -J -c BOOTCAT.BIN -b BOOTIMG.BIN -o $(IMG)/sanos_cross.iso $(INSTALL)
+	
+    rm $(INSTALL)/BOOTIMG.BIN
 
