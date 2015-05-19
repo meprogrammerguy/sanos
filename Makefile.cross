@@ -19,6 +19,7 @@ source:
              $(INSTALL)/mnt $(INSTALL)/proc $(INSTALL)/tmp $(INSTALL)/usr $(INSTALL)/var \
              $(INSTALL)/usr/bin $(INSTALL)/usr/lib $(INSTALL)/usr/src
     cp build/os.ini $(INSTALL)/etc/
+	cp build/setup_cross.ini $(INSTALL)/etc/setup.ini
     cp build/krnl.ini $(INSTALL)/boot/
     cp $(SRC)/Makefile $(INSTALL)/usr/src/
     cp -r $(SRC)/include $(INSTALL)/usr/
