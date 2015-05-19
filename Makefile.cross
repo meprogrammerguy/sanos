@@ -11,7 +11,7 @@ IMG=$(OUTPUT)/img
 ROOT=$(CURDIR)/cross/install
 CCPREFIX=$(ROOT)/usr
 
-all: sdkdisk bootcd
+all: sdkdisk
 
 source:
     mkdir -p $(OUTPUT) $(INSTALL) $(IMG) \

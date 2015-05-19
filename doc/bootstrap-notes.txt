@@ -5,7 +5,7 @@ run under quemu
 /$ cd /usr/src
 /usr/src$ make install
 /usr/src$ reboot
-sut down
+shut down
 "C:\Program Files\qemu\qemu-img" convert -O vpc sanos.vmdk sanos.vhd (hyper-v convert
 eth0:ip=10.0.1.100,gw=10.0.1.28,mask=255.255.255.0
 www.jbox.dk 93.166.244.18
