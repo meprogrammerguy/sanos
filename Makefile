@@ -1252,7 +1252,7 @@ $(IMG)/sanos.flp: dirs sanos config $(MKDFS) $(BUILD)/bootdisk.lst
 
 boothd: $(IMG)/sanos.vmdk
 
-$(IMG)/sanos.vmdk: dirs sanos config sdk $(MKDFS)
+$(IMG)/sanos.vmdk: dirs sanos tools config sdk $(MKDFS)
     $(MKDFS) -d $(IMG)/sanos.vmdk -t vmdk -b $(INSTALL)\boot\boot -l $(INSTALL)\boot\osldr.dll -k $(INSTALL)\boot\krnl.dll -c 100M -i -f -S $(INSTALL) -T /
 
 #
@@ -1270,7 +1270,7 @@ $(IMG)/sanos.0: dirs sanos $(MKDFS) $(BUILD)/bootnet.lst
 
 bootcd: $(IMG)/sanos.iso
 
-$(IMG)/sanos.iso: dirs sanos tools
+$(IMG)/sanos.iso: dirs sanos tools config sdk
     if exist $(IMG)\sanos.iso del $(IMG)\sanos.iso
     $(MKDFS) -d $(INSTALL)\BOOTIMG.BIN -b $(INSTALL)\boot\cdemboot -l $(INSTALL)\boot\osldr.dll -k $(INSTALL)\boot\krnl.dll -c 512 -C 1440 -I 8192 -i -f -K rootdev=cd0,rootfs=cdfs
     $(MKISOFS) -J -c BOOTCAT.BIN -b BOOTIMG.BIN -o $(IMG)\sanos.iso $(INSTALL)
