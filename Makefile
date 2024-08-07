@@ -54,20 +54,23 @@ DEFS=
 # MSVC=8  for Microsoft Visual Visual Studio 2005
 # MSVC=9  for Microsoft Visual Visual Studio 2008
 # MSVC=10 for Microsoft Visual Visual Studio 2010
+# MSVC=11 for Microsoft Visual Visual Studio 2012
 
 !IFNDEF MSVC
-MSVC=10
+MSVC=7
 !ENDIF
 
 AFLAGS=/nologo
 
-!IF $(MSVC) == 8 || $(MSVC) == 9 || $(MSVC) == 10
+!IF $(MSVC) == 11
+CFLAGS=/nologo /O2 /Ob1 /Oi /Ot /Oy /GS- /GR- /X /GF /Gy /W3 /arch:IA32 /I $(SRC)/include $(DEFS)
+!ELSEIF $(MSVC) == 8 || $(MSVC) == 9 || $(MSVC) == 10
 CFLAGS=/nologo /O2 /Ob1 /Oi /Ot /Oy /GS- /GR- /X /GF /Gy /W3 /I $(SRC)/include $(DEFS)
 !ELSE
 CFLAGS=/nologo /O2 /Og /Ob1 /Oi /Ot /Oy /X /GF /Gy /W3 /I $(SRC)/include $(DEFS)
 !ENDIF
 
-!IF $(MSVC) == 9 || $(MSVC) == 10
+!IF $(MSVC) > 8
 RAWIMGFLAGS=/FILEALIGN:4096
 !ELSE
 RAWIMGFLAGS=/OPT:WIN98
@@ -89,6 +92,7 @@ RAWIMGFLAGS=/OPT:WIN98
 #
 # /GS-                  Disable security checks
 # /GR-                  Disable runtime typeinfo
+# /arch:IA32            Generate code for x87
 #
 
 all: dirs tools sanos bootdisk boothd netbootimg bootcd
@@ -378,6 +382,7 @@ $(LIBS)/krnl.lib $(INSTALL)/boot/krnl.dll: \
   $(SRC)\sys\dev\kbd.c \
   $(SRC)\sys\dev\hd.c \
   $(SRC)\sys\dev\fd.c \
+  $(SRC)\sys\dev\vga.c \
   $(SRC)\sys\dev\virtioblk.c \
   $(SRC)\sys\dev\cons.c \
   $(SRC)\sys\net\udpsock.c \
@@ -1252,7 +1257,7 @@ $(IMG)/sanos.flp: dirs sanos config $(MKDFS) $(BUILD)/bootdisk.lst
 
 boothd: $(IMG)/sanos.vmdk
 
-$(IMG)/sanos.vmdk: dirs sanos tools config sdk $(MKDFS)
+$(IMG)/sanos.vmdk: dirs sanos config sdk $(MKDFS)
     $(MKDFS) -d $(IMG)/sanos.vmdk -t vmdk -b $(INSTALL)\boot\boot -l $(INSTALL)\boot\osldr.dll -k $(INSTALL)\boot\krnl.dll -c 100M -i -f -S $(INSTALL) -T /
 
 #
@@ -1270,7 +1275,7 @@ $(IMG)/sanos.0: dirs sanos $(MKDFS) $(BUILD)/bootnet.lst
 
 bootcd: $(IMG)/sanos.iso
 
-$(IMG)/sanos.iso: dirs sanos tools config sdk
+$(IMG)/sanos.iso: dirs sanos tools
     if exist $(IMG)\sanos.iso del $(IMG)\sanos.iso
     $(MKDFS) -d $(INSTALL)\BOOTIMG.BIN -b $(INSTALL)\boot\cdemboot -l $(INSTALL)\boot\osldr.dll -k $(INSTALL)\boot\krnl.dll -c 512 -C 1440 -I 8192 -i -f -K rootdev=cd0,rootfs=cdfs
     $(MKISOFS) -J -c BOOTCAT.BIN -b BOOTIMG.BIN -o $(IMG)\sanos.iso $(INSTALL)
@@ -1664,9 +1669,6 @@ source: dirs
     -@if not exist $(INSTALL)\usr\src\utils mkdir $(INSTALL)\usr\src\utils
     -@if not exist $(INSTALL)\usr\src\cmds mkdir $(INSTALL)\usr\src\cmds
     -@if not exist $(INSTALL)\usr\src\win32 mkdir $(INSTALL)\usr\src\win32
-	-@if not exist $(INSTALL)\usr\mnt mkdir $(INSTALL)\usr\mnt
-    -@if not exist $(INSTALL)\usr\tmp mkdir $(INSTALL)\usr\tmp
-
     copy /Y $(SRC)\Makefile $(INSTALL)\usr\src
     xcopy /S /I /Y /Q $(SRC)\include $(INSTALL)\usr\include
     xcopy /S /I /Y /Q $(SRC)\lib $(INSTALL)\usr\src\lib
