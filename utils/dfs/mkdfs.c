@@ -650,7 +650,7 @@ int main(int argc, char **argv)
     if (!f)
     {
       perror(filelist);
-      return;
+      return 1;
     }
     else
     {
